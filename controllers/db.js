@@ -3,11 +3,12 @@ const mysql = require("mysql2/promise");
 
 // إعداد اتصال قاعدة البيانات
 const dbConfig = {
-  host: "localhost",
+  host: "mysql.railway.internal",
   user: "root",
-  password: "",
-  database: "ifb",
+  password: "oufXwWgHaDJpOinwoEefEmTRoGuyWobZ",
+  database: "railway",
 };
+
 
 // دالة للحصول على اتصال بقاعدة البيانات
 async function getConnection() {
