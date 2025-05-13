@@ -30,7 +30,14 @@ async function LoginUser(req, res) {
 
       if (isPasswordValid) {
         // كلمة المرور صحيحة
-        res.json({ status: "success", data: user });
+          // هنا نتحقق من حالة الموافقة
+         if (user.users_approve === 0) {
+    // المستخدم غير متحقق من حسابه
+    res.json({ status: "pending_verification", data: user });
+  } else {
+    // المستخدم متحقق
+    res.json({ status: "success", data: user });
+  }
       } else {
         // كلمة المرور غير صحيحة
         res.json({
