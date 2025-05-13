@@ -51,6 +51,7 @@ async function RegisterUser(req, res) {
       users_password: hashedPassword,
       users_phone: users_phone,
       users_img: "logo.png",
+      users_name: "user",
       users_verflyCode: verificationCode, // إضافة كود التحقق هنا
     };
 
