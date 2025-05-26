@@ -2,7 +2,20 @@ const mysql = require("mysql2/promise");
 const nodemailer = require("nodemailer");
 const path = require("path"); // استيراد هذا لتسهيل التعامل مع مسارات الملفات  
 
+ 
+
+ 
+//صور
+const fs = require("fs"); 
+const fsPromises = require("fs").promises;
+
+const multer = require("multer"); 
+
+ 
 const { getConnection } = require("./db");
+
+
+
 
 // دالة لاسترجاع جميع البيانات
 async function getAllData(table, where = null, values = null, json = true) {
@@ -31,8 +44,8 @@ async function getAllData(table, where = null, values = null, json = true) {
   }
 }
 // دالة لاسترجاع بيانات فردية
-async function getData(table, where = null, values = null, json = true) {
-  const connection = await mysql.createConnection(dbConfig);
+async function getData(table, where = null, values = null, json = true) { 
+  const connection = await getConnection(); // الحصول على الاتصال
 
   const query = `SELECT * FROM ${mysql.escapeId(table)} WHERE ${where}`;
 
@@ -102,7 +115,7 @@ async function updateData(table, data, where, values, json = true) {
 
 // دالة لحذف البيانات
 async function deleteData(table, where, values, json = true) {
-  const connection = await mysql.createConnection(dbConfig);
+  const connection = await getConnection(); // الحصول على الاتصال
 
   const query = `DELETE FROM ${mysql.escapeId(table)} WHERE ${where}`;
 
@@ -118,6 +131,145 @@ async function deleteData(table, where, values, json = true) {
   }
 }
 
+
+
+ 
+
+const fileFilter = (req, file, cb) => {
+  const allowedExt = [".jpg", ".png", ".svg"];
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (allowedExt.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error("EXT"));
+  }
+};
+
+ 
+// Create a function to configure multer with custom path
+const createMulterConfig = (uploadPath) => {
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const finalPath = path.join(process.cwd(), uploadPath);
+      if (!fs.existsSync(finalPath)) {
+        fs.mkdirSync(finalPath, { recursive: true });
+        console.log("Created upload directory:", finalPath);
+      }
+      cb(null, finalPath);
+    },
+    filename: (req, file, cb) => {
+      // ابقي على الاسم الأصلي للملف
+      cb(null, file.originalname);
+    },
+
+    
+    //انشاء اسم عشوائي
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Math.round(Math.random() * 1E9);
+      const ext = path.extname(file.originalname);
+      cb(null, uniqueSuffix + ext);
+    }, 
+  });
+
+  return multer({
+    storage: storage,
+    limits: { fileSize: 20 * 1024 * 1024 },
+    fileFilter: fileFilter,
+  });
+};
+
+//  هي دالة middleware تستخدم عادة في مسارات (routes)
+// دالة شاملة لرفع الصور
+const handleImageUpload = (
+  uploadPath,
+  fieldConfigs = [
+    { name: "img_cover", maxCount: 1 },
+    { name: "img_gallery", maxCount: 10 },
+  ]
+) => {
+  // إنشاء تكوين multer
+  const multerConfig = createMulterConfig(uploadPath);
+
+  // دالة middleware لرفع الصور
+  return (req, res, next) => {
+    const upload = multerConfig.fields(fieldConfigs);
+
+    upload(req, res, (err) => {
+      if (err) {
+        console.error("Upload error:", err);
+        let msg = "حدث خطأ في الرفع";
+        if (err.code === "LIMIT_UNEXPECTED_FILE") {
+          msg = `اسم الحقل غير متوقع: ${err.field}`;
+        } else if (err.message === "EXT") {
+          msg = "ملف غير مسموح به";
+        } else if (err.code === "LIMIT_FILE_SIZE") {
+          msg = "حجم الملف كبير جداً";
+        }
+        return res.status(400).json({ error: msg });
+      }
+      next();
+    });
+  };
+};
+
+
+
+//  هي دالة middleware تستخدم عادة في مسارات (routes)
+// دالة شاملة لحذف الصور
+const handleImageDeletion = (uploadPath, tableName, idField, coverImageField, galleryImageField = null) => {
+  return async (req, res, next) => {
+    try {
+      const id = req.body[idField];
+      // تحقق مما إذا كان طلب رفع صورة جديدة
+      const newImageFile = req.files || req.files[coverImageField];
+
+      // إذا لم يتم رفع صورة جديدة، لا تحذف
+      if (!newImageFile) {
+        return next();
+      }
+      // الحصول على معلومات السجل
+      const result = await getData(tableName, `${idField} = ?`, [id]);
+
+      if (result.status === "success") {
+        const record = result.data;
+
+        // حذف صورة الغلاف
+        if (record[coverImageField] && record[coverImageField] !== "img.png") {
+          const coverPath = path.join(
+            process.cwd(),
+            uploadPath,
+            record[coverImageField]
+          );
+          if (await fsPromises.access(coverPath).catch(() => false)) {
+            await fsPromises.unlink(coverPath);
+            console.log("تم حذف صورة الغلاف:", coverPath);
+          }
+        }
+
+        // حذف صور المعرض إذا وجدت
+        if (galleryImageField && record[galleryImageField]) {
+          const galleryImages = record[galleryImageField].split(",");
+          galleryImages.forEach((image) => {
+            if (image && image !== "img.png") {
+              const galleryPath = path.join(process.cwd(), uploadPath, image);
+              if (fs.existsSync(galleryPath)) {
+                fs.unlinkSync(galleryPath);
+            //    console.log("Deleted gallery image:", galleryPath);
+              }
+            }
+          });
+        }
+      } else {
+        console.log("No record found to delete images for");
+      }
+
+      next();
+    } catch (error) {
+      console.error("Error deleting images: ", error);
+      next(error);
+    }
+  };
+};
 // دالة لإرسال البريد الإلكتروني
 
 /*
@@ -141,7 +293,7 @@ const sentMail = async (to, cc,name, subjectTitle, verificationCode, logoUrl) =>
   });
 
   const mailOptions = {
-    from: "yabro",
+    from: "Ideal Body",
     to: to,
     subject: subjectTitle,
     html: `  
@@ -179,4 +331,6 @@ module.exports = {
   updateData,
   deleteData,
   sentMail,
+  handleImageUpload,
+  handleImageDeletion,
 };
